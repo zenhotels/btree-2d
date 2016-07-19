@@ -2,7 +2,9 @@ package primary
 
 import (
 	"io"
+	"sync/atomic"
 
+	"github.com/zenhotels/btree-2d/common"
 	"github.com/zenhotels/btree-2d/lockie"
 	"github.com/zenhotels/btree-2d/secondary"
 )
@@ -10,15 +12,18 @@ import (
 // Layer represents the primary layer,
 // a tree holding Comparable keys pointing to secondary layers.
 type Layer struct {
-	store *Tree
-	lock  lockie.Lockie
+	store  *Tree
+	offset uint64
+	synced uint64 // id of the previously synced layer
+	lock   lockie.Lockie
 }
 
 // NewLayer initializes a new primary layer handle.
 func NewLayer() Layer {
 	return Layer{
-		store: NewTree(treeCmp),
-		lock:  lockie.NewLockie(),
+		store:  NewTree(treeCmp),
+		offset: uint64(common.RevOffset()),
+		lock:   lockie.NewLockie(),
 	}
 }
 
@@ -29,6 +34,10 @@ func (l Layer) Set(k Key, layer secondary.Layer) {
 	l.lock.Lock()
 	l.store.Set(k, layer)
 	l.lock.Unlock()
+}
+
+func (l Layer) Rev() uint64 {
+	return l.store.Ver() + l.offset
 }
 
 // Put adds secondary keys to the secondary layer, if it not exists
@@ -108,36 +117,40 @@ func (prev Layer) Sync(next Layer, onAdd, onDel func(key1 Key, key2 secondary.Ke
 	if prev.store == next.store {
 		return
 	}
-	// TODO(xlab): init at random versions so would not collide
-	// if next.store.Ver() <= prev.store.Ver() {
-	// 	return
-	// }
+	rev := next.Rev()
+	if atomic.LoadUint64(&prev.synced) == rev {
+		return
+	}
 	prev.lock.Lock()
-	next.lock.Lock()
 	prevIter, prevErr := prev.store.SeekFirst()
+	prev.lock.Unlock()
+	next.lock.Lock()
 	nextIter, nextErr := next.store.SeekFirst()
 	next.lock.Unlock()
-	prev.lock.Unlock()
 
 	switch {
 	case prevErr == io.EOF && nextErr == io.EOF:
 		// do nothing, both are empty
+		atomic.StoreUint64(&prev.synced, rev)
 		return
 	case prevErr == io.EOF:
 		// previous storage is empty, everything is added
 		addAll(prev, next.lock, nextIter, onAdd)
 		nextIter.Close()
+		atomic.StoreUint64(&prev.synced, rev)
 		return
 	case nextErr == io.EOF:
 		// next storage is empty, everything is deleted
 		deleteAll(prev, prev.lock, prevIter, onDel)
 		prevIter.Close()
+		atomic.StoreUint64(&prev.synced, rev)
 		return
 	default:
 		// do sync and trigger the corresponding callbacks
 		syncAll(prev, next, prevIter, nextIter, onAdd, onDel)
 		prevIter.Close()
 		nextIter.Close()
+		atomic.StoreUint64(&prev.synced, rev)
 		return
 	}
 }
@@ -207,11 +220,11 @@ func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
 	onAdd, onDel func(k1 Key, k2 secondary.Key)) {
 
 	prev.lock.Lock()
-	next.lock.Lock()
 	prevK, prevLayer, prevErr := prevIter.Next()
+	prev.lock.Unlock()
+	next.lock.Lock()
 	nextK, nextLayer, nextErr := nextIter.Next()
 	next.lock.Unlock()
-	prev.lock.Unlock()
 
 	for {
 		switch {
