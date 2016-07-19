@@ -11,8 +11,6 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
-
-	"github.com/joeshaw/gengen/generic"
 )
 
 const (
@@ -47,7 +45,7 @@ func (p *btTpool) get(cmp CmpFunc) *Tree {
 
 type btEpool struct{ sync.Pool }
 
-func (p *btEpool) get(err error, hit bool, i int, k generic.U, q *d, t *Tree, ver uint64) *Enumerator {
+func (p *btEpool) get(err error, hit bool, i int, k string, q *d, t *Tree, ver uint64) *Enumerator {
 	x := p.Get().(*Enumerator)
 	x.err, x.hit, x.i, x.k, x.q, x.t, x.ver = err, hit, i, k, q, t, ver
 	return x
@@ -62,7 +60,7 @@ type (
 	}
 
 	de struct { // d element
-		k generic.U
+		k string
 		v *FinalizerList
 	}
 
@@ -78,7 +76,7 @@ type (
 		err error
 		hit bool
 		i   int
-		k   generic.U
+		k   string
 		q   *d
 		t   *Tree
 		ver uint64
@@ -96,7 +94,7 @@ type (
 
 	xe struct { // x element
 		ch interface{}
-		k  generic.U
+		k  string
 	}
 
 	x struct { // index page
@@ -109,7 +107,7 @@ var ( // R/O zero values
 	zd  d
 	zde de
 	ze  Enumerator
-	zk  generic.U
+	zk  string
 	zt  Tree
 	zx  x
 	zxe xe
@@ -147,7 +145,7 @@ func (q *x) extract(i int) {
 	}
 }
 
-func (q *x) insert(i int, k generic.U, ch interface{}) *x {
+func (q *x) insert(i int, k string, ch interface{}) *x {
 	c := q.c
 	if i < c {
 		q.x[c+1].ch = q.x[c].ch
@@ -278,7 +276,7 @@ func (t *Tree) catX(p, q, r *x, pi int) {
 
 // Delete removes the k's KV pair, if it exists, in which case Delete returns
 // true.
-func (t *Tree) Delete(k generic.U) (ok bool) {
+func (t *Tree) Delete(k string) (ok bool) {
 	pi := -1
 	var p *x
 	q := t.r
@@ -341,8 +339,8 @@ func (t *Tree) extract(q *d, i int) { // (r *FinalizerList) {
 	return
 }
 
-func (t *Tree) find(q interface{}, k generic.U) (i int, ok bool) {
-	var mk generic.U
+func (t *Tree) find(q interface{}, k string) (i int, ok bool) {
+	var mk string
 	l := 0
 	switch x := q.(type) {
 	case *x:
@@ -379,7 +377,7 @@ func (t *Tree) find(q interface{}, k generic.U) (i int, ok bool) {
 
 // First returns the first item of the tree in the key collating order, or
 // (zero-value, zero-value) if the tree is empty.
-func (t *Tree) First() (k generic.U, v *FinalizerList) {
+func (t *Tree) First() (k string, v *FinalizerList) {
 	if q := t.first; q != nil {
 		q := &q.d[0]
 		k, v = q.k, q.v
@@ -389,7 +387,7 @@ func (t *Tree) First() (k generic.U, v *FinalizerList) {
 
 // Get returns the value associated with k and true if it exists. Otherwise Get
 // returns (zero-value, false).
-func (t *Tree) Get(k generic.U) (v *FinalizerList, ok bool) {
+func (t *Tree) Get(k string) (v *FinalizerList, ok bool) {
 	q := t.r
 	if q == nil {
 		return
@@ -415,7 +413,7 @@ func (t *Tree) Get(k generic.U) (v *FinalizerList, ok bool) {
 	}
 }
 
-func (t *Tree) insert(q *d, i int, k generic.U, v *FinalizerList) *d {
+func (t *Tree) insert(q *d, i int, k string, v *FinalizerList) *d {
 	atomic.AddUint64(&t.ver, 1)
 	c := q.c
 	if i < c {
@@ -430,7 +428,7 @@ func (t *Tree) insert(q *d, i int, k generic.U, v *FinalizerList) *d {
 
 // Last returns the last item of the tree in the key collating order, or
 // (zero-value, zero-value) if the tree is empty.
-func (t *Tree) Last() (k generic.U, v *FinalizerList) {
+func (t *Tree) Last() (k string, v *FinalizerList) {
 	if q := t.last; q != nil {
 		q := &q.d[q.c-1]
 		k, v = q.k, q.v
@@ -443,7 +441,7 @@ func (t *Tree) Len() int {
 	return t.c
 }
 
-func (t *Tree) overflow(p *x, q *d, pi, i int, k generic.U, v *FinalizerList) {
+func (t *Tree) overflow(p *x, q *d, pi, i int, k string, v *FinalizerList) {
 	atomic.AddUint64(&t.ver, 1)
 	l, r := p.siblings(pi)
 
@@ -473,7 +471,7 @@ func (t *Tree) overflow(p *x, q *d, pi, i int, k generic.U, v *FinalizerList) {
 // Seek returns an Enumerator positioned on an item such that k >= item's key.
 // ok reports if k == item.key The Enumerator's position is possibly after the
 // last item in the tree.
-func (t *Tree) Seek(k generic.U) (e *Enumerator, ok bool) {
+func (t *Tree) Seek(k string) (e *Enumerator, ok bool) {
 	q := t.r
 	if q == nil {
 		e = btEPool.get(nil, false, 0, k, nil, t, atomic.LoadUint64(&t.ver))
@@ -524,7 +522,7 @@ func (t *Tree) SeekLast() (e *Enumerator, err error) {
 }
 
 // Set sets the value associated with k.
-func (t *Tree) Set(k generic.U, v *FinalizerList) {
+func (t *Tree) Set(k string, v *FinalizerList) {
 	//dbg("--- PRE Set(%v, %v)\n%s", k, v, t.dump())
 	//defer func() {
 	//	dbg("--- POST\n%s\n====\n", t.dump())
@@ -589,7 +587,7 @@ func (t *Tree) Set(k generic.U, v *FinalizerList) {
 // 	tree.Put(k, func(generic.U, bool){ return v, true })
 //
 // modulo the differing return values.
-func (t *Tree) Put(k generic.U, upd func(oldV *FinalizerList, exists bool) (newV *FinalizerList, write bool)) (oldV *FinalizerList, written bool) {
+func (t *Tree) Put(k string, upd func(oldV *FinalizerList, exists bool) (newV *FinalizerList, write bool)) (oldV *FinalizerList, written bool) {
 	pi := -1
 	var p *x
 	q := t.r
@@ -655,7 +653,7 @@ func (t *Tree) Put(k generic.U, upd func(oldV *FinalizerList, exists bool) (newV
 	}
 }
 
-func (t *Tree) split(p *x, q *d, pi, i int, k generic.U, v *FinalizerList) {
+func (t *Tree) split(p *x, q *d, pi, i int, k string, v *FinalizerList) {
 	atomic.AddUint64(&t.ver, 1)
 	r := btDPool.Get().(*d)
 	if q.n != nil {
@@ -817,7 +815,7 @@ func (e *Enumerator) Close() {
 // Next returns the currently enumerated item, if it exists and moves to the
 // next item in the key collation order. If there is no item to return, err ==
 // io.EOF is returned.
-func (e *Enumerator) Next() (k generic.U, v *FinalizerList, err error) {
+func (e *Enumerator) Next() (k string, v *FinalizerList, err error) {
 	if err = e.err; err != nil {
 		return
 	}
@@ -870,7 +868,7 @@ func (e *Enumerator) next() error {
 // Prev returns the currently enumerated item, if it exists and moves to the
 // previous item in the key collation order. If there is no item to return, err
 // == io.EOF is returned.
-func (e *Enumerator) Prev() (k generic.U, v *FinalizerList, err error) {
+func (e *Enumerator) Prev() (k string, v *FinalizerList, err error) {
 	if err = e.err; err != nil {
 		return
 	}

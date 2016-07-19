@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/joeshaw/gengen/generic"
 	"github.com/zenhotels/btree-2d/secondary"
 )
 
@@ -39,7 +40,7 @@ var (
 
 type btTpool struct{ sync.Pool }
 
-func (p *btTpool) get(cmp Cmp) *Tree {
+func (p *btTpool) get(cmp CmpFunc) *Tree {
 	x := p.Get().(*Tree)
 	x.cmp = cmp
 	return x
@@ -47,21 +48,13 @@ func (p *btTpool) get(cmp Cmp) *Tree {
 
 type btEpool struct{ sync.Pool }
 
-func (p *btEpool) get(err error, hit bool, i int, k Key, q *d, t *Tree, ver uint64) *Enumerator {
+func (p *btEpool) get(err error, hit bool, i int, k generic.T, q *d, t *Tree, ver uint64) *Enumerator {
 	x := p.Get().(*Enumerator)
 	x.err, x.hit, x.i, x.k, x.q, x.t, x.ver = err, hit, i, k, q, t, ver
 	return x
 }
 
 type (
-	// Cmp compares a and b. Return value is:
-	//
-	//	< 0 if a <  b
-	//	  0 if a == b
-	//	> 0 if a >  b
-	//
-	Cmp func(a, b Key) int
-
 	d struct { // data page
 		c int
 		d [2*kd + 1]de
@@ -70,7 +63,7 @@ type (
 	}
 
 	de struct { // d element
-		k Key
+		k generic.T
 		v secondary.Layer
 	}
 
@@ -86,7 +79,7 @@ type (
 		err error
 		hit bool
 		i   int
-		k   Key
+		k   generic.T
 		q   *d
 		t   *Tree
 		ver uint64
@@ -95,7 +88,7 @@ type (
 	// Tree is a B+tree.
 	Tree struct {
 		c     int
-		cmp   Cmp
+		cmp   CmpFunc
 		first *d
 		last  *d
 		r     interface{}
@@ -104,7 +97,7 @@ type (
 
 	xe struct { // x element
 		ch interface{}
-		k  Key
+		k  generic.T
 	}
 
 	x struct { // index page
@@ -117,7 +110,7 @@ var ( // R/O zero values
 	zd  d
 	zde de
 	ze  Enumerator
-	zk  Key
+	zk  generic.T
 	zt  Tree
 	zx  x
 	zxe xe
@@ -155,7 +148,7 @@ func (q *x) extract(i int) {
 	}
 }
 
-func (q *x) insert(i int, k Key, ch interface{}) *x {
+func (q *x) insert(i int, k generic.T, ch interface{}) *x {
 	c := q.c
 	if i < c {
 		q.x[c+1].ch = q.x[c].ch
@@ -201,7 +194,7 @@ func (l *d) mvR(r *d, c int) {
 
 // NewTree returns a newly created, empty Tree. The compare function is used
 // for key collation.
-func NewTree(cmp Cmp) *Tree {
+func NewTree(cmp CmpFunc) *Tree {
 	return btTPool.get(cmp)
 }
 
@@ -286,7 +279,7 @@ func (t *Tree) catX(p, q, r *x, pi int) {
 
 // Delete removes the k's KV pair, if it exists, in which case Delete returns
 // true.
-func (t *Tree) Delete(k Key) (ok bool) {
+func (t *Tree) Delete(k generic.T) (ok bool) {
 	pi := -1
 	var p *x
 	q := t.r
@@ -349,8 +342,8 @@ func (t *Tree) extract(q *d, i int) { // (r secondary.Layer) {
 	return
 }
 
-func (t *Tree) find(q interface{}, k Key) (i int, ok bool) {
-	var mk Key
+func (t *Tree) find(q interface{}, k generic.T) (i int, ok bool) {
+	var mk generic.T
 	l := 0
 	switch x := q.(type) {
 	case *x:
@@ -387,7 +380,7 @@ func (t *Tree) find(q interface{}, k Key) (i int, ok bool) {
 
 // First returns the first item of the tree in the key collating order, or
 // (zero-value, zero-value) if the tree is empty.
-func (t *Tree) First() (k Key, v secondary.Layer) {
+func (t *Tree) First() (k generic.T, v secondary.Layer) {
 	if q := t.first; q != nil {
 		q := &q.d[0]
 		k, v = q.k, q.v
@@ -397,7 +390,7 @@ func (t *Tree) First() (k Key, v secondary.Layer) {
 
 // Get returns the value associated with k and true if it exists. Otherwise Get
 // returns (zero-value, false).
-func (t *Tree) Get(k Key) (v secondary.Layer, ok bool) {
+func (t *Tree) Get(k generic.T) (v secondary.Layer, ok bool) {
 	q := t.r
 	if q == nil {
 		return
@@ -423,7 +416,7 @@ func (t *Tree) Get(k Key) (v secondary.Layer, ok bool) {
 	}
 }
 
-func (t *Tree) insert(q *d, i int, k Key, v secondary.Layer) *d {
+func (t *Tree) insert(q *d, i int, k generic.T, v secondary.Layer) *d {
 	atomic.AddUint64(&t.ver, 1)
 	c := q.c
 	if i < c {
@@ -438,7 +431,7 @@ func (t *Tree) insert(q *d, i int, k Key, v secondary.Layer) *d {
 
 // Last returns the last item of the tree in the key collating order, or
 // (zero-value, zero-value) if the tree is empty.
-func (t *Tree) Last() (k Key, v secondary.Layer) {
+func (t *Tree) Last() (k generic.T, v secondary.Layer) {
 	if q := t.last; q != nil {
 		q := &q.d[q.c-1]
 		k, v = q.k, q.v
@@ -451,7 +444,7 @@ func (t *Tree) Len() int {
 	return t.c
 }
 
-func (t *Tree) overflow(p *x, q *d, pi, i int, k Key, v secondary.Layer) {
+func (t *Tree) overflow(p *x, q *d, pi, i int, k generic.T, v secondary.Layer) {
 	atomic.AddUint64(&t.ver, 1)
 	l, r := p.siblings(pi)
 
@@ -481,7 +474,7 @@ func (t *Tree) overflow(p *x, q *d, pi, i int, k Key, v secondary.Layer) {
 // Seek returns an Enumerator positioned on an item such that k >= item's key.
 // ok reports if k == item.key The Enumerator's position is possibly after the
 // last item in the tree.
-func (t *Tree) Seek(k Key) (e *Enumerator, ok bool) {
+func (t *Tree) Seek(k generic.T) (e *Enumerator, ok bool) {
 	q := t.r
 	if q == nil {
 		e = btEPool.get(nil, false, 0, k, nil, t, atomic.LoadUint64(&t.ver))
@@ -532,7 +525,7 @@ func (t *Tree) SeekLast() (e *Enumerator, err error) {
 }
 
 // Set sets the value associated with k.
-func (t *Tree) Set(k Key, v secondary.Layer) {
+func (t *Tree) Set(k generic.T, v secondary.Layer) {
 	//dbg("--- PRE Set(%v, %v)\n%s", k, v, t.dump())
 	//defer func() {
 	//	dbg("--- POST\n%s\n====\n", t.dump())
@@ -594,10 +587,10 @@ func (t *Tree) Set(k Key, v secondary.Layer) {
 //
 // 	tree.Set(k, v) call conceptually equals calling
 //
-// 	tree.Put(k, func(Key, bool){ return v, true })
+// 	tree.Put(k, func(generic.T, bool){ return v, true })
 //
 // modulo the differing return values.
-func (t *Tree) Put(k Key, upd func(oldV secondary.Layer, exists bool) (newV secondary.Layer, write bool)) (oldV secondary.Layer, written bool) {
+func (t *Tree) Put(k generic.T, upd func(oldV secondary.Layer, exists bool) (newV secondary.Layer, write bool)) (oldV secondary.Layer, written bool) {
 	pi := -1
 	var p *x
 	q := t.r
@@ -663,7 +656,7 @@ func (t *Tree) Put(k Key, upd func(oldV secondary.Layer, exists bool) (newV seco
 	}
 }
 
-func (t *Tree) split(p *x, q *d, pi, i int, k Key, v secondary.Layer) {
+func (t *Tree) split(p *x, q *d, pi, i int, k generic.T, v secondary.Layer) {
 	atomic.AddUint64(&t.ver, 1)
 	r := btDPool.Get().(*d)
 	if q.n != nil {
@@ -825,7 +818,7 @@ func (e *Enumerator) Close() {
 // Next returns the currently enumerated item, if it exists and moves to the
 // next item in the key collation order. If there is no item to return, err ==
 // io.EOF is returned.
-func (e *Enumerator) Next() (k Key, v secondary.Layer, err error) {
+func (e *Enumerator) Next() (k generic.T, v secondary.Layer, err error) {
 	if err = e.err; err != nil {
 		return
 	}
@@ -878,7 +871,7 @@ func (e *Enumerator) next() error {
 // Prev returns the currently enumerated item, if it exists and moves to the
 // previous item in the key collation order. If there is no item to return, err
 // == io.EOF is returned.
-func (e *Enumerator) Prev() (k Key, v secondary.Layer, err error) {
+func (e *Enumerator) Prev() (k generic.T, v secondary.Layer, err error) {
 	if err = e.err; err != nil {
 		return
 	}

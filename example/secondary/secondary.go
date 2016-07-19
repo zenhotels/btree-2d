@@ -4,7 +4,6 @@ import (
 	"io"
 	"sync/atomic"
 
-	"github.com/joeshaw/gengen/generic"
 	"github.com/zenhotels/btree-2d/lockie"
 	"github.com/zenhotels/btree-2d/util"
 )
@@ -15,7 +14,7 @@ import (
 //	  0 if a == b
 //	> 0 if a >  b
 //
-type CmpFunc func(key1, key2 generic.U) int
+type CmpFunc func(key1, key2 string) int
 
 // Layer represents the secondary layer,
 // a tree holding Finalizable yet Comparable keys.
@@ -44,7 +43,7 @@ func (l Layer) Rev() uint64 {
 }
 
 // Put adds finalizers for the key, creating the item if not exists yet.
-func (l Layer) Put(k generic.U, finalizers ...func()) (added int) {
+func (l Layer) Put(k string, finalizers ...func()) (added int) {
 	l.lock.Lock()
 	l.store.Put(k, func(oldV *FinalizerList, exists bool) (newV *FinalizerList, write bool) {
 		if !exists || oldV == nil {
@@ -66,7 +65,7 @@ func (l Layer) Put(k generic.U, finalizers ...func()) (added int) {
 
 // ForEach runs the provided function for every element in the layer,
 // if function returns true, the loop stops.
-func (l Layer) ForEach(fn func(key generic.U, val *FinalizerList) bool) {
+func (l Layer) ForEach(fn func(key string, val *FinalizerList) bool) {
 	l.lock.Lock()
 	e, err := l.store.SeekFirst()
 	l.lock.Unlock()
@@ -85,7 +84,7 @@ func (l Layer) ForEach(fn func(key generic.U, val *FinalizerList) bool) {
 }
 
 // Seek returns an Enumerator positioned on a key such that k >= key.
-func (l Layer) Seek(k generic.U) (e *Enumerator, ok bool) {
+func (l Layer) Seek(k string) (e *Enumerator, ok bool) {
 	l.lock.Lock()
 	e, ok = l.store.Seek(k)
 	l.lock.Unlock()
@@ -101,7 +100,7 @@ func (l Layer) SeekFirst() (e *Enumerator, err error) {
 }
 
 // Delete removes the key and runs all its finalizers.
-func (l Layer) Delete(k generic.U) (ok bool) {
+func (l Layer) Delete(k string) (ok bool) {
 	l.lock.Lock()
 	v, found := l.store.Get(k)
 	if found {
@@ -132,7 +131,7 @@ func (l Layer) Finalize() {
 	l.lock.Unlock()
 }
 
-func (prev Layer) Sync(next Layer, onAdd, onDel func(key generic.U)) {
+func (prev Layer) Sync(next Layer, onAdd, onDel func(key string)) {
 	if prev.store == next.store {
 		return
 	}
@@ -174,7 +173,7 @@ func (prev Layer) Sync(next Layer, onAdd, onDel func(key generic.U)) {
 	}
 }
 
-func addAll(prev Layer, nextLock lockie.Lockie, nextIter *Enumerator, onAdd func(k generic.U)) {
+func addAll(prev Layer, nextLock lockie.Lockie, nextIter *Enumerator, onAdd func(k string)) {
 	nextLock.Lock()
 	k, _, err := nextIter.Next()
 	nextLock.Unlock()
@@ -192,7 +191,7 @@ func addAll(prev Layer, nextLock lockie.Lockie, nextIter *Enumerator, onAdd func
 	}
 }
 
-func deleteAll(prev Layer, prevLock lockie.Lockie, prevIter *Enumerator, onDel func(k generic.U)) {
+func deleteAll(prev Layer, prevLock lockie.Lockie, prevIter *Enumerator, onDel func(k string)) {
 	prevLock.Lock()
 	k, v, err := prevIter.Next()
 	prevLock.Unlock()
@@ -215,7 +214,7 @@ func deleteAll(prev Layer, prevLock lockie.Lockie, prevIter *Enumerator, onDel f
 	prevLock.Unlock()
 }
 
-func syncAll(prev, next Layer, prevIter, nextIter *Enumerator, onAdd, onDel func(k generic.U)) {
+func syncAll(prev, next Layer, prevIter, nextIter *Enumerator, onAdd, onDel func(k string)) {
 	prev.lock.Lock()
 	prevK, prevV, prevErr := prevIter.Next()
 	prev.lock.Unlock()

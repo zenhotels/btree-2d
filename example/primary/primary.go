@@ -3,9 +3,8 @@ package primary
 import (
 	"io"
 
-	"github.com/joeshaw/gengen/generic"
+	"github.com/zenhotels/btree-2d/example/secondary"
 	"github.com/zenhotels/btree-2d/lockie"
-	"github.com/zenhotels/btree-2d/secondary"
 	"github.com/zenhotels/btree-2d/util"
 )
 
@@ -15,7 +14,7 @@ import (
 //	  0 if a == b
 //	> 0 if a >  b
 //
-type CmpFunc func(key1, key2 generic.T) int
+type CmpFunc func(key1, key2 int) int
 
 // Layer represents the primary layer,
 // a tree holding comparable keys pointing to secondary layers.
@@ -43,7 +42,7 @@ func NewLayer(cmp1 CmpFunc, cmp2 secondary.CmpFunc) Layer {
 
 // Set just adds a secondary layer to the tree, overwriting the previous one.
 // Note that this action would trigger the replaced layer finalizers.
-func (l Layer) Set(k generic.T, layer secondary.Layer) {
+func (l Layer) Set(k int, layer secondary.Layer) {
 	l.lock.Lock()
 	l.store.Put(k, func(oldLayer secondary.Layer, exists bool) (newLayer secondary.Layer, write bool) {
 		if exists {
@@ -60,7 +59,7 @@ func (l Layer) Rev() uint64 {
 
 // Put adds keys and callbacks to the secondary layer, which will be created
 // if not yet existing.
-func (l Layer) Put(k generic.T, k2 generic.U, finalizers ...func()) {
+func (l Layer) Put(k int, k2 string, finalizers ...func()) {
 	l.lock.Lock()
 	l.store.Put(k, func(oldLayer secondary.Layer, exists bool) (newLayer secondary.Layer, write bool) {
 		if !exists {
@@ -73,7 +72,7 @@ func (l Layer) Put(k generic.T, k2 generic.U, finalizers ...func()) {
 }
 
 // Seek returns an Enumerator positioned on a secondary layer such that k >= layer's key.
-func (l Layer) Seek(k generic.T) (e *Enumerator, ok bool) {
+func (l Layer) Seek(k int) (e *Enumerator, ok bool) {
 	l.lock.Lock()
 	e, ok = l.store.Seek(k)
 	l.lock.Unlock()
@@ -90,7 +89,7 @@ func (l Layer) SeekFirst() (e *Enumerator, err error) {
 
 // ForEach runs the provided function for every element in the layer,
 // if function returns true, the loop stops.
-func (l Layer) ForEach(fn func(key generic.T, layer secondary.Layer) bool) {
+func (l Layer) ForEach(fn func(key int, layer secondary.Layer) bool) {
 	l.lock.Lock()
 	e, err := l.store.SeekFirst()
 	l.lock.Unlock()
@@ -110,7 +109,7 @@ func (l Layer) ForEach(fn func(key generic.T, layer secondary.Layer) bool) {
 
 // Drop removes the whole secondary layer associated with the key,
 // invokes all the finalizers associated with elements of this secondary layer.
-func (l Layer) Drop(k generic.T) (ok bool) {
+func (l Layer) Drop(k int) (ok bool) {
 	l.lock.Lock()
 	v, found := l.store.Get(k)
 	if found {
@@ -124,14 +123,14 @@ func (l Layer) Drop(k generic.T) (ok bool) {
 }
 
 // Get returns the secondary layer associated with the key.
-func (l Layer) Get(k generic.T) (layer secondary.Layer, ok bool) {
+func (l Layer) Get(k int) (layer secondary.Layer, ok bool) {
 	l.lock.Lock()
 	v, ok := l.store.Get(k)
 	l.lock.Unlock()
 	return v, ok
 }
 
-func (prev Layer) Sync(next Layer, onAdd, onDel func(key1 generic.T, key2 generic.U)) {
+func (prev Layer) Sync(next Layer, onAdd, onDel func(key1 int, key2 string)) {
 	if prev.store == next.store {
 		return
 	}
@@ -174,7 +173,7 @@ func (prev Layer) Sync(next Layer, onAdd, onDel func(key1 generic.T, key2 generi
 }
 
 func addAll(prev Layer, nextLock lockie.Lockie, nextIter *Enumerator,
-	onAdd func(key1 generic.T, key2 generic.U)) {
+	onAdd func(key1 int, key2 string)) {
 
 	nextLock.Lock()
 	nextK, nextLayer, err := nextIter.Next()
@@ -187,7 +186,7 @@ func addAll(prev Layer, nextLock lockie.Lockie, nextIter *Enumerator,
 
 			// fills layer while calling the onAdd callback
 			if onAdd != nil {
-				newLayer.Sync(nextLayer, func(k2 generic.U) {
+				newLayer.Sync(nextLayer, func(k2 string) {
 					onAdd(nextK, k2)
 				}, nil)
 			} else {
@@ -207,7 +206,7 @@ func addAll(prev Layer, nextLock lockie.Lockie, nextIter *Enumerator,
 }
 
 func deleteAll(prev Layer, prevLock lockie.Lockie, prevIter *Enumerator,
-	onDel func(key1 generic.T, key2 generic.U)) {
+	onDel func(key1 int, key2 string)) {
 
 	prevLock.Lock()
 	prevK, prevLayer, err := prevIter.Next()
@@ -216,7 +215,7 @@ func deleteAll(prev Layer, prevLock lockie.Lockie, prevIter *Enumerator,
 	for err != io.EOF {
 		// nukes the prevLayer yet calling the onDel callback
 		if onDel != nil {
-			prevLayer.Sync(secondary.NewLayer(prev.cmp2), nil, func(k2 generic.U) {
+			prevLayer.Sync(secondary.NewLayer(prev.cmp2), nil, func(k2 string) {
 				onDel(prevK, k2)
 			})
 		} else {
@@ -235,7 +234,7 @@ func deleteAll(prev Layer, prevLock lockie.Lockie, prevIter *Enumerator,
 }
 
 func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
-	onAdd, onDel func(k1 generic.T, k2 generic.U)) {
+	onAdd, onDel func(k1 int, k2 string)) {
 
 	prev.lock.Lock()
 	prevK, prevLayer, prevErr := prevIter.Next()
@@ -257,7 +256,7 @@ func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
 
 				// fills layer while calling the onAdd callback
 				if onAdd != nil {
-					newLayer.Sync(nextLayer, func(k2 generic.U) {
+					newLayer.Sync(nextLayer, func(k2 string) {
 						onAdd(nextK, k2)
 					}, nil)
 				} else {
@@ -281,7 +280,7 @@ func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
 			}
 			// at this point next is ended, so prevK is deleted
 			if onDel != nil {
-				prevLayer.ForEach(func(k2 generic.U, v2 *secondary.FinalizerList) bool {
+				prevLayer.ForEach(func(k2 string, v2 *secondary.FinalizerList) bool {
 					if onDel != nil {
 						onDel(prevK, k2)
 					}
@@ -307,7 +306,7 @@ func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
 		case prevCmp < 0: // prevK < nextK
 			// old prevK has been deleted apparently
 			if onDel != nil {
-				prevLayer.ForEach(func(k2 generic.U, v2 *secondary.FinalizerList) bool {
+				prevLayer.ForEach(func(k2 string, v2 *secondary.FinalizerList) bool {
 					if onDel != nil {
 						onDel(prevK, k2)
 					}
@@ -335,7 +334,7 @@ func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
 
 				// fills layer while calling the onAdd callback
 				if onAdd != nil {
-					newLayer.Sync(nextLayer, func(k2 generic.U) {
+					newLayer.Sync(nextLayer, func(k2 string) {
 						onAdd(nextK, k2)
 					}, nil)
 				} else {
@@ -356,17 +355,17 @@ func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
 			// we're on the same keys, sync the layers
 			switch {
 			case onAdd != nil && onDel != nil:
-				prevLayer.Sync(nextLayer, func(k2 generic.U) {
+				prevLayer.Sync(nextLayer, func(k2 string) {
 					onAdd(nextK, k2)
-				}, func(k2 generic.U) {
+				}, func(k2 string) {
 					onDel(prevK, k2)
 				})
 			case onAdd != nil:
-				prevLayer.Sync(nextLayer, func(k2 generic.U) {
+				prevLayer.Sync(nextLayer, func(k2 string) {
 					onAdd(nextK, k2)
 				}, nil)
 			case onDel != nil:
-				prevLayer.Sync(nextLayer, nil, func(k2 generic.U) {
+				prevLayer.Sync(nextLayer, nil, func(k2 string) {
 					onDel(prevK, k2)
 				})
 			default: // no callbacks
