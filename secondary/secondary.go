@@ -13,13 +13,15 @@ import (
 type Layer struct {
 	store  *Tree
 	offset uint64
-	synced uint64 // id of the previously synced layer
+	synced *uint64 // id of the previously synced layer
 	lock   lockie.Lockie
 }
 
 // NewLayer initializes a new secondary layer handle.
 func NewLayer() Layer {
+	var synced uint64
 	return Layer{
+		synced: &synced,
 		store:  NewTree(treeCmp),
 		offset: uint64(common.RevOffset()),
 		lock:   lockie.NewLockie(),
@@ -109,8 +111,8 @@ func (prev Layer) Sync(next Layer, onAdd, onDel func(key Key)) {
 	if prev.store == next.store {
 		return
 	}
-	rev := next.Rev()
-	if atomic.LoadUint64(&prev.synced) == rev {
+	nextRev := next.Rev()
+	if prevRev := atomic.LoadUint64(prev.synced); prevRev == nextRev {
 		return
 	}
 	prev.lock.Lock()
@@ -123,26 +125,26 @@ func (prev Layer) Sync(next Layer, onAdd, onDel func(key Key)) {
 	switch {
 	case prevErr == io.EOF && nextErr == io.EOF:
 		// do nothing, both are empty
-		atomic.StoreUint64(&prev.synced, rev)
+		atomic.StoreUint64(prev.synced, nextRev)
 		return
 	case prevErr == io.EOF:
 		// previous storage is empty, everything is added
 		addAll(prev, next.lock, nextIter, onAdd)
 		nextIter.Close()
-		atomic.StoreUint64(&prev.synced, rev)
+		atomic.StoreUint64(prev.synced, nextRev)
 		return
 	case nextErr == io.EOF:
 		// next storage is empty, everything is deleted
 		deleteAll(prev, prev.lock, prevIter, onDel)
 		prevIter.Close()
-		atomic.StoreUint64(&prev.synced, rev)
+		atomic.StoreUint64(prev.synced, nextRev)
 		return
 	default:
 		// do sync and trigger the corresponding callbacks
 		syncAll(prev, next, prevIter, nextIter, onAdd, onDel)
 		prevIter.Close()
 		nextIter.Close()
-		atomic.StoreUint64(&prev.synced, rev)
+		atomic.StoreUint64(prev.synced, nextRev)
 		return
 	}
 }

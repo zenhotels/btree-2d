@@ -2,7 +2,6 @@ package primary
 
 import (
 	"io"
-	"sync/atomic"
 
 	"github.com/zenhotels/btree-2d/common"
 	"github.com/zenhotels/btree-2d/lockie"
@@ -14,13 +13,15 @@ import (
 type Layer struct {
 	store  *Tree
 	offset uint64
-	synced uint64 // id of the previously synced layer
+	synced *uint64 // id of the previously synced layer
 	lock   lockie.Lockie
 }
 
 // NewLayer initializes a new primary layer handle.
 func NewLayer() Layer {
+	var synced uint64
 	return Layer{
+		synced: &synced,
 		store:  NewTree(treeCmp),
 		offset: uint64(common.RevOffset()),
 		lock:   lockie.NewLockie(),
@@ -117,10 +118,14 @@ func (prev Layer) Sync(next Layer, onAdd, onDel func(key1 Key, key2 secondary.Ke
 	if prev.store == next.store {
 		return
 	}
-	rev := next.Rev()
-	if atomic.LoadUint64(&prev.synced) == rev {
-		return
-	}
+	// TODO(xlab): primary cannot handle changes on secondary layers.
+	// Disable this feature for now
+	//
+	// nextRev := next.Rev()
+	// if prevRev := atomic.LoadUint64(prev.synced); prevRev == nextRev {
+	// 	log.Println()
+	// 	return
+	// }
 	prev.lock.Lock()
 	prevIter, prevErr := prev.store.SeekFirst()
 	prev.lock.Unlock()
@@ -131,26 +136,22 @@ func (prev Layer) Sync(next Layer, onAdd, onDel func(key1 Key, key2 secondary.Ke
 	switch {
 	case prevErr == io.EOF && nextErr == io.EOF:
 		// do nothing, both are empty
-		atomic.StoreUint64(&prev.synced, rev)
 		return
 	case prevErr == io.EOF:
 		// previous storage is empty, everything is added
 		addAll(prev, next.lock, nextIter, onAdd)
 		nextIter.Close()
-		atomic.StoreUint64(&prev.synced, rev)
 		return
 	case nextErr == io.EOF:
 		// next storage is empty, everything is deleted
 		deleteAll(prev, prev.lock, prevIter, onDel)
 		prevIter.Close()
-		atomic.StoreUint64(&prev.synced, rev)
 		return
 	default:
 		// do sync and trigger the corresponding callbacks
 		syncAll(prev, next, prevIter, nextIter, onAdd, onDel)
 		prevIter.Close()
 		nextIter.Close()
-		atomic.StoreUint64(&prev.synced, rev)
 		return
 	}
 }
