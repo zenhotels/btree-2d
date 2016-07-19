@@ -15,6 +15,7 @@ type Comparable interface {
 type FinalizableComparable interface {
 	Comparable
 
+	Value() Comparable
 	Finalize()
 	AddFinalizer(fn func()) bool
 }

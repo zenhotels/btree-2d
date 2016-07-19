@@ -33,6 +33,10 @@ func (w *withoutFinalizers) Finalize() {
 
 }
 
+func (w *withoutFinalizers) Value() common.Comparable {
+	return w.obj
+}
+
 func (w *withoutFinalizers) AddFinalizer(fn func()) bool {
 	return false
 }
@@ -45,11 +49,18 @@ type withFinalizers struct {
 	onceNewList sync.Once
 }
 
+func (w *withFinalizers) Value() common.Comparable {
+	return w.obj
+}
+
 func (w *withFinalizers) Less(w2 common.Comparable) bool {
 	return w.obj.Less(w2.(*withFinalizers).obj)
 }
 
 func (w *withFinalizers) Finalize() {
+	w.onceNewList.Do(func() {
+		w.list = make([]func(), MaxFinalizers)
+	})
 	offset := atomic.SwapInt64(&w.offset, 100)
 	if offset >= 100 {
 		return
