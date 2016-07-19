@@ -51,7 +51,7 @@ func getTree(nLimit int, callbacks ...func()) BTree2D {
 			info := &routeInfo{
 				Host: uint64((i + 1) * (j + 1)),
 			}
-			next.Put(ID(i), NewFinalizable(info))
+			next.Put(ID(i), NonFinalizable(info))
 		}
 	}
 	return next

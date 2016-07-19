@@ -16,7 +16,7 @@ func NewFinalizable(obj common.Comparable) common.FinalizableComparable {
 }
 
 func NonFinalizable(obj common.Comparable) common.FinalizableComparable {
-	return &withFinalizers{
+	return &withoutFinalizers{
 		obj: obj,
 	}
 }
