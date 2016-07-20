@@ -1,38 +1,37 @@
-package primary
+package btree2d
 
 import (
 	"io"
 
-	"github.com/zenhotels/btree-2d/example/secondary"
 	"github.com/zenhotels/btree-2d/lockie"
 	"github.com/zenhotels/btree-2d/util"
 )
 
-// CmpFunc compares a and b. Return value is:
+// PrimaryCmpFunc compares a and b. Return value is:
 //
 //	< 0 if a <  b
 //	  0 if a == b
 //	> 0 if a >  b
 //
-type CmpFunc func(key1, key2 int) int
+type PrimaryCmpFunc func(key1, key2 int) int
 
-// Layer represents the primary layer,
+// PrimaryLayer represents the primary layer,
 // a tree holding comparable keys pointing to secondary layers.
-type Layer struct {
-	store  *Tree
+type PrimaryLayer struct {
+	store  *PrimaryTree
 	offset uint64
 	synced *uint64 // id of the previously synced layer
 	lock   lockie.Lockie
-	cmp1   CmpFunc
-	cmp2   secondary.CmpFunc
+	cmp1   PrimaryCmpFunc
+	cmp2   SecondaryCmpFunc
 }
 
-// NewLayer initializes a new primary layer handle.
-func NewLayer(cmp1 CmpFunc, cmp2 secondary.CmpFunc) Layer {
+// NewPrimaryLayer initializes a new primary layer handle.
+func NewPrimaryLayer(cmp1 PrimaryCmpFunc, cmp2 SecondaryCmpFunc) PrimaryLayer {
 	var synced uint64
-	return Layer{
+	return PrimaryLayer{
 		synced: &synced,
-		store:  NewTree(cmp1),
+		store:  NewPrimaryTree(cmp1),
 		offset: uint64(util.RevOffset()),
 		lock:   lockie.NewLockie(),
 		cmp1:   cmp1,
@@ -42,9 +41,9 @@ func NewLayer(cmp1 CmpFunc, cmp2 secondary.CmpFunc) Layer {
 
 // Set just adds a secondary layer to the tree, overwriting the previous one.
 // Note that this action would trigger the replaced layer finalizers.
-func (l Layer) Set(k int, layer secondary.Layer) {
+func (l PrimaryLayer) Set(k int, layer SecondaryLayer) {
 	l.lock.Lock()
-	l.store.Put(k, func(oldLayer secondary.Layer, exists bool) (newLayer secondary.Layer, write bool) {
+	l.store.Put(k, func(oldLayer SecondaryLayer, exists bool) (newLayer SecondaryLayer, write bool) {
 		if exists {
 			oldLayer.Finalize()
 		}
@@ -53,17 +52,17 @@ func (l Layer) Set(k int, layer secondary.Layer) {
 	l.lock.Unlock()
 }
 
-func (l Layer) Rev() uint64 {
+func (l PrimaryLayer) Rev() uint64 {
 	return l.store.Ver() + l.offset
 }
 
 // Put adds keys and callbacks to the secondary layer, which will be created
 // if not yet existing.
-func (l Layer) Put(k int, k2 string, finalizers ...func()) {
+func (l PrimaryLayer) Put(k int, k2 string, finalizers ...func()) {
 	l.lock.Lock()
-	l.store.Put(k, func(oldLayer secondary.Layer, exists bool) (newLayer secondary.Layer, write bool) {
+	l.store.Put(k, func(oldLayer SecondaryLayer, exists bool) (newLayer SecondaryLayer, write bool) {
 		if !exists {
-			oldLayer = secondary.NewLayer(l.cmp2)
+			oldLayer = NewSecondaryLayer(l.cmp2)
 		}
 		oldLayer.Put(k2, finalizers...)
 		return oldLayer, true
@@ -71,16 +70,16 @@ func (l Layer) Put(k int, k2 string, finalizers ...func()) {
 	l.lock.Unlock()
 }
 
-// Seek returns an Enumerator positioned on a secondary layer such that k >= layer's key.
-func (l Layer) Seek(k int) (e *Enumerator, ok bool) {
+// Seek returns an PrimaryEnumerator positioned on a secondary layer such that k >= layer's key.
+func (l PrimaryLayer) Seek(k int) (e *PrimaryEnumerator, ok bool) {
 	l.lock.Lock()
 	e, ok = l.store.Seek(k)
 	l.lock.Unlock()
 	return
 }
 
-// SeekFirst returns an Enumerator positioned on the first secondary layer in the tree.
-func (l Layer) SeekFirst() (e *Enumerator, err error) {
+// SeekFirst returns an PrimaryEnumerator positioned on the first secondary layer in the tree.
+func (l PrimaryLayer) SeekFirst() (e *PrimaryEnumerator, err error) {
 	l.lock.Lock()
 	e, err = l.store.SeekFirst()
 	l.lock.Unlock()
@@ -89,7 +88,7 @@ func (l Layer) SeekFirst() (e *Enumerator, err error) {
 
 // ForEach runs the provided function for every element in the layer,
 // if function returns true, the loop stops.
-func (l Layer) ForEach(fn func(key int, layer secondary.Layer) bool) {
+func (l PrimaryLayer) ForEach(fn func(key int, layer SecondaryLayer) bool) {
 	l.lock.Lock()
 	e, err := l.store.SeekFirst()
 	l.lock.Unlock()
@@ -109,7 +108,7 @@ func (l Layer) ForEach(fn func(key int, layer secondary.Layer) bool) {
 
 // Drop removes the whole secondary layer associated with the key,
 // invokes all the finalizers associated with elements of this secondary layer.
-func (l Layer) Drop(k int) (ok bool) {
+func (l PrimaryLayer) Drop(k int) (ok bool) {
 	l.lock.Lock()
 	v, found := l.store.Get(k)
 	if found {
@@ -118,19 +117,20 @@ func (l Layer) Drop(k int) (ok bool) {
 	l.lock.Unlock()
 	if found {
 		v.Finalize()
+		v.close()
 	}
 	return
 }
 
 // Get returns the secondary layer associated with the key.
-func (l Layer) Get(k int) (layer secondary.Layer, ok bool) {
+func (l PrimaryLayer) Get(k int) (layer SecondaryLayer, ok bool) {
 	l.lock.Lock()
 	v, ok := l.store.Get(k)
 	l.lock.Unlock()
 	return v, ok
 }
 
-func (prev Layer) Sync(next Layer, onAdd, onDel func(key1 int, key2 string)) {
+func (prev PrimaryLayer) Sync(next PrimaryLayer, onAdd, onDel func(key1 int, key2 string)) {
 	if prev.store == next.store {
 		return
 	}
@@ -155,24 +155,24 @@ func (prev Layer) Sync(next Layer, onAdd, onDel func(key1 int, key2 string)) {
 		return
 	case prevErr == io.EOF:
 		// previous storage is empty, everything is added
-		addAll(prev, next.lock, nextIter, onAdd)
+		prev.addAll(next.lock, nextIter, onAdd)
 		nextIter.Close()
 		return
 	case nextErr == io.EOF:
 		// next storage is empty, everything is deleted
-		deleteAll(prev, prev.lock, prevIter, onDel)
+		prev.deleteAll(prevIter, onDel)
 		prevIter.Close()
 		return
 	default:
 		// do sync and trigger the corresponding callbacks
-		syncAll(prev, next, prevIter, nextIter, onAdd, onDel)
+		prev.syncAll(next, prevIter, nextIter, onAdd, onDel)
 		prevIter.Close()
 		nextIter.Close()
 		return
 	}
 }
 
-func addAll(prev Layer, nextLock lockie.Lockie, nextIter *Enumerator,
+func (prev PrimaryLayer) addAll(nextLock lockie.Lockie, nextIter *PrimaryEnumerator,
 	onAdd func(key1 int, key2 string)) {
 
 	nextLock.Lock()
@@ -182,7 +182,7 @@ func addAll(prev Layer, nextLock lockie.Lockie, nextIter *Enumerator,
 	for err != io.EOF {
 		if nextLayer.Len() > 0 {
 			// create a new layer to set into prev
-			newLayer := secondary.NewLayer(prev.cmp2)
+			newLayer := NewSecondaryLayer(prev.cmp2)
 
 			// fills layer while calling the onAdd callback
 			if onAdd != nil {
@@ -205,35 +205,35 @@ func addAll(prev Layer, nextLock lockie.Lockie, nextIter *Enumerator,
 	}
 }
 
-func deleteAll(prev Layer, prevLock lockie.Lockie, prevIter *Enumerator,
+func (prev PrimaryLayer) deleteAll(prevIter *PrimaryEnumerator,
 	onDel func(key1 int, key2 string)) {
 
-	prevLock.Lock()
+	prev.lock.Lock()
 	prevK, prevLayer, err := prevIter.Next()
-	prevLock.Unlock()
+	prev.lock.Unlock()
 
 	for err != io.EOF {
 		// nukes the prevLayer yet calling the onDel callback
 		if onDel != nil {
-			prevLayer.Sync(secondary.NewLayer(prev.cmp2), nil, func(k2 string) {
+			prevLayer.Sync(NewSecondaryLayer(prev.cmp2), nil, func(k2 string) {
 				onDel(prevK, k2)
 			})
 		} else {
-			prevLayer.Sync(secondary.NewLayer(prev.cmp2), nil, nil)
+			prevLayer.Sync(NewSecondaryLayer(prev.cmp2), nil, nil)
 		}
 
 		// advance next iter
-		prevLock.Lock()
+		prev.lock.Lock()
 		prevK, prevLayer, err = prevIter.Next()
-		prevLock.Unlock()
+		prev.lock.Unlock()
 	}
 	// finally clear the store
-	prevLock.Lock()
+	prev.lock.Lock()
 	prev.store.Clear()
-	prevLock.Unlock()
+	prev.lock.Unlock()
 }
 
-func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
+func (prev PrimaryLayer) syncAll(next PrimaryLayer, prevIter, nextIter *PrimaryEnumerator,
 	onAdd, onDel func(k1 int, k2 string)) {
 
 	prev.lock.Lock()
@@ -252,7 +252,7 @@ func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
 			// at this point prev is ended, so nextK is added
 			if nextLayer.Len() > 0 {
 				// create a new layer to set into prev
-				newLayer := secondary.NewLayer(prev.cmp2)
+				newLayer := NewSecondaryLayer(prev.cmp2)
 
 				// fills layer while calling the onAdd callback
 				if onAdd != nil {
@@ -280,7 +280,7 @@ func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
 			}
 			// at this point next is ended, so prevK is deleted
 			if onDel != nil {
-				prevLayer.ForEach(func(k2 string, v2 *secondary.FinalizerList) bool {
+				prevLayer.ForEach(func(k2 string, v2 *FinalizerList) bool {
 					if onDel != nil {
 						onDel(prevK, k2)
 					}
@@ -295,6 +295,7 @@ func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
 			// delete prevK in prev
 			prev.lock.Lock()
 			prev.store.Delete(prevK)
+			prevLayer.close()
 			// move prev iterator
 			prevK, prevLayer, prevErr = prevIter.Next()
 			prev.lock.Unlock()
@@ -306,7 +307,7 @@ func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
 		case prevCmp < 0: // prevK < nextK
 			// old prevK has been deleted apparently
 			if onDel != nil {
-				prevLayer.ForEach(func(k2 string, v2 *secondary.FinalizerList) bool {
+				prevLayer.ForEach(func(k2 string, v2 *FinalizerList) bool {
 					if onDel != nil {
 						onDel(prevK, k2)
 					}
@@ -322,6 +323,7 @@ func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
 			// delete prevK in prev
 			prev.lock.Lock()
 			prev.store.Delete(prevK)
+			prevLayer.close()
 			// move prev iterator
 			prevK, prevLayer, prevErr = prevIter.Next()
 			prev.lock.Unlock()
@@ -330,7 +332,7 @@ func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
 			// new nextK has been inserted apparently
 			if nextLayer.Len() > 0 {
 				// create a new layer to set into prev
-				newLayer := secondary.NewLayer(prev.cmp2)
+				newLayer := NewSecondaryLayer(prev.cmp2)
 
 				// fills layer while calling the onAdd callback
 				if onAdd != nil {
@@ -383,7 +385,7 @@ func syncAll(prev, next Layer, prevIter, nextIter *Enumerator,
 	}
 }
 
-func (l Layer) Len() int {
+func (l PrimaryLayer) Len() int {
 	l.lock.Lock()
 	count := l.store.Len()
 	l.lock.Unlock()

@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/xlab/treeprint"
 	"github.com/zenhotels/btree-2d/example/btree2d"
-	"github.com/zenhotels/btree-2d/example/secondary"
 )
 
 func cmpInt(a, b int) int {
@@ -56,9 +55,9 @@ func TestSync(t *testing.T) {
 
 func repr(t btree2d.BTree2D) string {
 	tree := treeprint.New()
-	t.ForEach(func(k int, layer secondary.Layer) bool {
+	t.ForEach(func(k int, layer btree2d.SecondaryLayer) bool {
 		layerBranch := tree.AddBranch(k)
-		layer.ForEach(func(key string, list *secondary.FinalizerList) bool {
+		layer.ForEach(func(key string, list *btree2d.FinalizerList) bool {
 			if list != nil {
 				if funcs := list.Len(); funcs > 0 {
 					funcsLabel := fmt.Sprintf("funcs: %d", funcs)

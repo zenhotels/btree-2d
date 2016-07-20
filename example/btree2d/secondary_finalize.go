@@ -1,4 +1,4 @@
-package secondary
+package btree2d
 
 import (
 	"sync"
